@@ -21,7 +21,7 @@ export class Blockchain
   idxPos: number;
   dbPos: number;
 
-  constructor(directory: string)
+  constructor(directory: string, options: Deno.OpenOptions)
   {
     if (!existsSync(directory))
       throw("The directory '" + directory +"' does not exist!");
@@ -31,8 +31,8 @@ export class Blockchain
     if (!existsSync(newDirPath))
       Deno.mkdirSync(newDirPath);
     
-    this.bcidx = Deno.openSync(newDirPath + "idx", { read: true, write: true, truncate: false, create: true });
-    this.bcdb  = Deno.openSync(newDirPath + "data",  { read: true, write: true, truncate: false, create: true });
+    this.bcidx = Deno.openSync(newDirPath + "idx", options);
+    this.bcdb  = Deno.openSync(newDirPath + "data",  options);
 
     this.idxPos = Deno.seekSync(this.bcidx.rid, 0, Deno.SeekMode.End);
     this.dbPos  = Deno.seekSync(this.bcdb.rid, 0, Deno.SeekMode.End);
@@ -78,6 +78,39 @@ export class Blockchain
   }
 
 
+  hasIndexById(id: number): boolean
+  {
+    const oldIdxPos = this.idxPos;
+
+    Deno.seekSync(this.bcidx.rid, 0, Deno.SeekMode.Start); // seek to start (temporarily! seek to end at the end of this function)
+
+    while (1)
+    {
+      // read the index identifier 
+      const idxIdBuf = new Uint8Array(4); // read 4 bytes aka. 32 bits
+      const actualReadBytes = Deno.readSync(this.bcidx.rid, idxIdBuf);
+
+      if (actualReadBytes !== 4)
+        break;
+
+      const idxIdView = new DataView(idxIdBuf.buffer, 0);
+      if (idxIdView.getUint32(0, true) == id) // little-endian
+      {
+        // reset file cursors to the state before call of this function
+        Deno.seekSync(this.bcidx.rid, oldIdxPos, Deno.SeekMode.Start);
+        return true;
+      }
+
+      Deno.seekSync(this.bcidx.rid, 4, Deno.SeekMode.Current); // skip size
+    }
+
+    
+    // reset file cursors to the state before call of this function
+    Deno.seekSync(this.bcidx.rid, oldIdxPos, Deno.SeekMode.Start);
+    return false;
+  }
+
+
   getByIndex(at: number): Block
   {
     // NOTE: read does increase the cusor
@@ -91,7 +124,7 @@ export class Blockchain
 
     while (1)
     {
-      //console.log("currentAt: " + currentAt);
+      // console.log("currentAt: " + currentAt);
 
 
       // read the index identifier 
@@ -116,7 +149,7 @@ export class Blockchain
       //console.log("("+currentAt+") dbSize = " + dbSize);
 
 
-      if (currentAt == at) // if this is the wanted index by position
+      if (currentAt === at) // if this is the wanted index by position
       {
         // get data from db
         const dbPos = Deno.seekSync(this.bcdb.rid, skipThisManyBytesInDb, Deno.SeekMode.Start); // go to index position in db
